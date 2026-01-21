@@ -11,6 +11,7 @@ struct ChatRoomView: View {
     @State private var errorMessage: String?
     @State private var realtimeChannel: RealtimeChannelV2?
     @State private var currentUserId: UUID?
+    @State private var currentUserName: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -49,19 +50,23 @@ struct ChatRoomView: View {
                             ForEach(messages) { message in
                                 MessageBubbleView(
                                     message: message,
-                                    isCurrentUser: message.userId == currentUserId
+                                    isCurrentUser: message.userId == currentUserId,
+                                    currentUserName: currentUserName
                                 )
                                 .id(message.id)
                             }
                         }
                         .padding()
-                    }
-                    .onChange(of: messages.count) { _ in
-                        if let lastMessage = messages.last {
-                            withAnimation {
-                                proxy.scrollTo(lastMessage.id, anchor: .bottom)
-                            }
+                        .onAppear {
+                            // Scroll to bottom when content first appears
+                            scrollToBottom(proxy: proxy, delay: 0.3)
                         }
+                    }
+                    .onChange(of: messages.count) { oldCount in
+                        // Scroll to bottom when messages count changes
+                        // Use longer delay for initial load (0 -> N messages)
+                        let isInitialLoad = oldCount == 0
+                        scrollToBottom(proxy: proxy, animated: !isInitialLoad, delay: isInitialLoad ? 0.4 : 0.2)
                     }
                 }
             }
@@ -98,10 +103,33 @@ struct ChatRoomView: View {
         }
     }
 
+    func scrollToBottom(proxy: ScrollViewProxy, animated: Bool = false, delay: Double = 0.2) {
+        guard let lastMessage = messages.last else { return }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+            if animated {
+                withAnimation(.easeOut(duration: 0.3)) {
+                    proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                }
+            } else {
+                proxy.scrollTo(lastMessage.id, anchor: .bottom)
+            }
+        }
+    }
+
     func loadCurrentUser() async {
         do {
             let session = try await supabase.auth.session
             currentUserId = session.user.id
+
+            // Get user name from metadata or email
+            let metadata = session.user.userMetadata
+            if let fullNameJSON = metadata["full_name"],
+               case let .string(fullName) = fullNameJSON {
+                currentUserName = fullName
+            } else {
+                currentUserName = session.user.email ?? "You"
+            }
         } catch {
             debugPrint("Error loading current user:", error)
         }
@@ -147,7 +175,7 @@ struct ChatRoomView: View {
         // Create a channel for this specific thing_id
         let channel = supabase.channel("messages:\(thingId)")
 
-        // Subscribe to INSERT events on the messages table filtered by thing_id
+        // Subscribe to INSERT events on the messages table filtered by thing_id (for persistence)
         let insertions = await channel.postgresChange(
             InsertAction.self,
             schema: "public",
@@ -155,12 +183,22 @@ struct ChatRoomView: View {
             filter: "thing_id=eq.\(thingId)"
         )
 
+        // Subscribe to broadcast events (for instant real-time updates)
+        let broadcasts = channel.broadcastStream(event: "message")
+
         realtimeChannel = channel
 
         // Subscribe to the channel
         await channel.subscribe()
 
-        // Listen for new messages
+        // Listen for broadcast messages (instant updates)
+        Task {
+            for await broadcast in broadcasts {
+                await handleBroadcastMessage(broadcast)
+            }
+        }
+
+        // Listen for database changes (persistent updates, fallback)
         Task {
             for await insertion in insertions {
                 await handleNewMessage(insertion.record)
@@ -168,22 +206,59 @@ struct ChatRoomView: View {
         }
     }
 
+    func handleBroadcastMessage(_ payload: JSONObject) async {
+        // Handle instant broadcast messages
+        do {
+            // Convert JSONObject (Dictionary<String, AnyJSON>) to encodable format
+            let jsonData = try JSONEncoder().encode(payload)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            let broadcastMsg = try decoder.decode(BroadcastMessage.self, from: jsonData)
+
+            // Add the message optimistically (it will be confirmed by postgres change)
+            await MainActor.run {
+                // Check if message with this temporary/real ID already exists
+                if !messages.contains(where: { $0.message == broadcastMsg.message && $0.userId == broadcastMsg.userId && abs($0.date.timeIntervalSince(broadcastMsg.date)) < 2 }) {
+                    // Create a temporary ChatMessage from broadcast
+                    let tempMessage = ChatMessage(
+                        id: broadcastMsg.id ?? UUID(),
+                        thingId: UUID(uuidString: thingId) ?? UUID(),
+                        message: broadcastMsg.message,
+                        userId: broadcastMsg.userId,
+                        date: broadcastMsg.date,
+                        meta: broadcastMsg.meta,
+                        profile: nil  // Profile will come from DB
+                    )
+                    messages.append(tempMessage)
+                }
+            }
+        } catch {
+            debugPrint("Error decoding broadcast message:", error)
+        }
+    }
+
     func handleNewMessage(_ record: [String: AnyJSON]) async {
-        // Decode the record to ChatMessage
+        // Decode the record to ChatMessage from database
         do {
             let jsonData = try JSONEncoder().encode(record)
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
             let message = try decoder.decode(ChatMessage.self, from: jsonData)
 
-            // Add the new message if it doesn't already exist
+            // Add the new message if it doesn't already exist (deduplication)
             await MainActor.run {
                 if !messages.contains(where: { $0.id == message.id }) {
+                    // Remove any temporary message that matches this one
+                    messages.removeAll { tempMsg in
+                        tempMsg.message == message.message &&
+                        tempMsg.userId == message.userId &&
+                        abs(tempMsg.date.timeIntervalSince(message.date)) < 2
+                    }
                     messages.append(message)
                 }
             }
         } catch {
-            debugPrint("Error decoding realtime message:", error)
+            debugPrint("Error decoding database message:", error)
         }
     }
 
@@ -202,21 +277,52 @@ struct ChatRoomView: View {
         newMessageText = ""
 
         do {
+            guard let channel = realtimeChannel else {
+                throw NSError(domain: "ChatRoom", code: -1, userInfo: [NSLocalizedDescriptionKey: "Channel not initialized"])
+            }
+
             // Create ISO8601 date string for meta
             let dateFormatter = ISO8601DateFormatter()
             let createDate = dateFormatter.string(from: Date())
+            let now = Date()
+            let userName = currentUserName ?? "Unknown"
 
-            // Use the RPC function like the web version
+            // 1. Broadcast the message immediately for instant updates
+            let broadcastMsg = BroadcastMessage(
+                id: nil,  // Will be assigned by database
+                message: messageContent,
+                userId: currentUserId,
+                date: now,
+                meta: [
+                    "createDate": AnyCodable(createDate),
+                    "nameFromAuth": AnyCodable(userName)
+                ]
+            )
+
+            // Encode broadcast message to JSON
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            let broadcastData = try encoder.encode(broadcastMsg)
+
+            // Decode as JSONObject directly
+            let decoder = JSONDecoder()
+            let broadcastJSON = try decoder.decode(JSONObject.self, from: broadcastData)
+
+            // Send broadcast
+            await channel.broadcast(event: "message", message: broadcastJSON)
+
+            // 2. Write to database for persistence (this happens in parallel)
             try await supabase.rpc(
                 "add_chat_message",
                 params: AddChatMessageParams(
                     message: messageContent,
                     thingId: thingId,
-                    meta: MessageMeta(createDate: createDate)
+                    meta: MessageMeta(createDate: createDate, nameFromAuth: userName)
                 )
             ).execute()
 
-            // The realtime subscription will handle adding the message to the UI
+            // The broadcast gives instant feedback, and the database write ensures persistence
+            // The postgres change listener will update with the real ID and profile info
 
         } catch {
             errorMessage = "Failed to send message: \(error.localizedDescription)"
@@ -230,6 +336,7 @@ struct ChatRoomView: View {
 struct MessageBubbleView: View {
     let message: ChatMessage
     let isCurrentUser: Bool
+    let currentUserName: String?
 
     var body: some View {
         HStack {
@@ -238,13 +345,11 @@ struct MessageBubbleView: View {
             }
 
             VStack(alignment: isCurrentUser ? .trailing : .leading, spacing: 4) {
-                // Show user name for messages from others
-                if !isCurrentUser, let profile = message.profile, let fullName = profile.fullName {
-                    Text(fullName)
-                        .font(.caption)
-                        .fontWeight(.medium)
-                        .foregroundStyle(.secondary)
-                }
+                // Always show user name
+                Text(displayName)
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .foregroundStyle(.secondary)
 
                 Text(message.message ?? "")
                     .padding(.horizontal, 12)
@@ -261,6 +366,25 @@ struct MessageBubbleView: View {
             if !isCurrentUser {
                 Spacer(minLength: 60)
             }
+        }
+    }
+
+    private var displayName: String {
+        if isCurrentUser {
+            return currentUserName ?? "You"
+        } else {
+            // First try to get name from meta->nameFromAuth
+            if let meta = message.meta,
+               let nameFromAuthCodable = meta["nameFromAuth"],
+               let nameFromAuth = nameFromAuthCodable.value as? String {
+                return nameFromAuth
+            }
+            // Fall back to profile full_name
+            if let fullName = message.profile?.fullName {
+                return fullName
+            }
+            // Last resort
+            return "Unknown User"
         }
     }
 }
@@ -312,6 +436,24 @@ struct AddChatMessageParams: Encodable {
 
 struct MessageMeta: Encodable {
     let createDate: String
+    let nameFromAuth: String
+}
+
+// Broadcast message structure (for instant real-time updates)
+struct BroadcastMessage: Codable {
+    let id: UUID?
+    let message: String
+    let userId: UUID?
+    let date: Date
+    let meta: [String: AnyCodable]?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case message
+        case userId = "user_id"
+        case date
+        case meta
+    }
 }
 
 // Helper for decoding arbitrary JSON values

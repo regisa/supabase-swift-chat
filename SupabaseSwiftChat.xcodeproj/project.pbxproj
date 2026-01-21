@@ -17,6 +17,7 @@
 		DBC459252F213910007568E2 /* AuthView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBC459262F213910007568E2 /* AuthView.swift */; };
 		DBC4592B2F213940007568E2 /* AppView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBC4592C2F213940007568E2 /* AppView.swift */; };
 		DBC4592D2F213950007568E2 /* MessagesListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBC4592E2F213950007568E2 /* MessagesListView.swift */; };
+		DBC459332F213960007568E2 /* ChatRoomView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBC459342F213960007568E2 /* ChatRoomView.swift */; };
 		DBC4591E2F213752007568E2 /* Auth in Frameworks */ = {isa = PBXBuildFile; productRef = DBC4591D2F213752007568E2 /* Auth */; };
 		DBC459202F213752007568E2 /* Realtime in Frameworks */ = {isa = PBXBuildFile; productRef = DBC4591F2F213752007568E2 /* Realtime */; };
 		DBC459222F213752007568E2 /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = DBC459212F213752007568E2 /* Supabase */; };
@@ -36,6 +37,7 @@
 		DBC459262F213910007568E2 /* AuthView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthView.swift; sourceTree = "<group>"; };
 		DBC4592C2F213940007568E2 /* AppView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppView.swift; sourceTree = "<group>"; };
 		DBC4592E2F213950007568E2 /* MessagesListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessagesListView.swift; sourceTree = "<group>"; };
+		DBC459342F213960007568E2 /* ChatRoomView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatRoomView.swift; sourceTree = "<group>"; };
 		DBC459312F213A00007568E2 /* Config.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Config.plist; sourceTree = "<group>"; };
 		DBC459322F213A10007568E2 /* Config.example.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Config.example.plist; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -80,6 +82,7 @@
 				DBC4592C2F213940007568E2 /* AppView.swift */,
 				DBC459262F213910007568E2 /* AuthView.swift */,
 				DBC4592E2F213950007568E2 /* MessagesListView.swift */,
+				DBC459342F213960007568E2 /* ChatRoomView.swift */,
 				193228C02ACF6AC700966FE1 /* Main.storyboard */,
 				193228C32ACF6AC800966FE1 /* Assets.xcassets */,
 				193228C52ACF6AC800966FE1 /* LaunchScreen.storyboard */,
@@ -177,6 +180,7 @@
 				DBC459252F213910007568E2 /* AuthView.swift in Sources */,
 				DBC4592B2F213940007568E2 /* AppView.swift in Sources */,
 				DBC4592D2F213950007568E2 /* MessagesListView.swift in Sources */,
+				DBC459332F213960007568E2 /* ChatRoomView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

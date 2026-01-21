@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct MessagesListView: View {
-    @State var thingIds: [String] = []
+    @State var thingIds: [UUID] = []
     @State var isLoading = false
     @State var errorMessage: String?
 
@@ -33,13 +33,15 @@ struct MessagesListView: View {
                     }
                 } else {
                     List(thingIds, id: \.self) { thingId in
-                        HStack {
-                            Image(systemName: "message.fill")
-                                .foregroundStyle(.blue)
-                            Text(thingId)
-                                .font(.body)
+                        NavigationLink(destination: ChatRoomView(thingId: thingId.uuidString)) {
+                            HStack {
+                                Image(systemName: "message.fill")
+                                    .foregroundStyle(.blue)
+                                Text(thingId.uuidString)
+                                    .font(.body)
+                            }
+                            .padding(.vertical, 4)
                         }
-                        .padding(.vertical, 4)
                     }
                 }
             }
@@ -80,7 +82,7 @@ struct MessagesListView: View {
 
             // Extract unique thing_ids
             let ids = response.compactMap { $0.thingId }
-            self.thingIds = Array(Set(ids)).sorted()
+            self.thingIds = Array(Set(ids)).sorted { $0.uuidString < $1.uuidString }
 
         } catch {
             errorMessage = error.localizedDescription
@@ -90,7 +92,7 @@ struct MessagesListView: View {
 }
 
 struct Message: Decodable {
-    let thingId: String?
+    let thingId: UUID?
 
     enum CodingKeys: String, CodingKey {
         case thingId = "thing_id"

@@ -10,7 +10,7 @@ struct ChatRoomView: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var realtimeChannel: RealtimeChannelV2?
-    @State private var currentUserId: String?
+    @State private var currentUserId: UUID?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -101,7 +101,7 @@ struct ChatRoomView: View {
     func loadCurrentUser() async {
         do {
             let session = try await supabase.auth.session
-            currentUserId = session.user.id.uuidString
+            currentUserId = session.user.id
         } catch {
             debugPrint("Error loading current user:", error)
         }

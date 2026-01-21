@@ -63,3 +63,5 @@ fastlane/test_output
 
 # Environment configuration
 Config.plist
+
+.DS_Store
